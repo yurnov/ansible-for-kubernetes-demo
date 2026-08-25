@@ -1,0 +1,116 @@
+---
+# 5 — One playbook, many sites: switch connection per task at runtime
+#
+# The production pattern this comes from: the same playbook runs on every
+# site. When it executes ON the site it manages (THIS_SITE_NAME matches),
+# tasks run locally; for every OTHER site they run inside that site's
+# worker pod — reached through the kubectl connection plugin.
+#
+#   THIS_SITE_NAME=site-a ansible-playbook playbooks/05-site-aware.yml
+#
+# site-a tasks run on your machine, site-b tasks run inside the pod on the
+# site-b cluster. Flip the variable and watch it invert.
+#
+# Requires the ansible-worker pods from playbook 03.
+#
+# Also demonstrated here, because everyone confuses them:
+#   environment:                     -> variables INSIDE the pod (for the task)
+#   ansible_kubectl_local_env_vars:  -> variables for the LOCAL kubectl process
+#                                       on the controller (auth plugins, proxies)
+
+- name: Site-aware execution
+  hosts: sites
+  gather_facts: false
+  vars:
+    this_site: "{{ lookup('ansible.builtin.env', 'THIS_SITE_NAME') }}"
+
+  tasks:
+    - name: Find this site's worker pod through the API (name is data, not config)
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig }}"
+        kind: Pod
+        namespace: "{{ kube_namespace }}"
+        label_selectors:
+          - app=ansible-worker
+        field_selectors:
+          - status.phase=Running
+      register: worker_query
+
+    - name: Remember the pod name
+      ansible.builtin.set_fact:
+        dynamic_pod_name: "{{ worker_query.resources[0].metadata.name }}"
+
+    # THE trick: ansible_connection decided per task, at runtime.
+    # 'local' when we are already at this site, kubectl-into-the-pod otherwise.
+    - name: Run where it makes sense
+      vars:
+        ansible_connection: "{{ (this_site == site_id) | ternary('local', 'kubernetes.core.kubectl') }}"
+        # GOTCHA: the discovered interpreter fact belongs to the HOST, not the
+        # connection. Earlier local tasks cached the controller's Python; that
+        # path does not exist inside the pod. Switch the interpreter together
+        # with the connection, or the module will fail with rc=127.
+        ansible_python_interpreter: "{{ (this_site == site_id) | ternary(ansible_playbook_python, '/usr/local/bin/python3') }}"
+        ansible_kubectl_namespace: "{{ kube_namespace }}"
+        ansible_kubectl_config: "{{ kubeconfig }}"
+        ansible_kubectl_pod: "{{ dynamic_pod_name }}"
+        ansible_kubectl_container: worker
+        # Passed to the LOCAL kubectl the connection plugin spawns.
+        # This is how kubectl's exec-based auth (aws eks get-token, gcloud,
+        # azure kubelogin) gets its credentials — the task's `environment:`
+        # keyword can NOT reach that process.
+        ansible_kubectl_local_env_vars:
+          AWS_SHARED_CREDENTIALS_FILE: "{{ awscredentials | default('') }}"
+          AWS_CONFIG_FILE: "{{ awsconfig | default('') }}"
+          AWS_PROFILE: "{{ aws_profile | default('') }}"
+          AWS_REGION: "{{ aws_region | default('') }}"
+      ansible.builtin.command: uname -n
+      register: where
+      changed_when: false
+
+    - name: Same playbook, different execution locations
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ (this_site == site_id) | ternary('LOCAL', 'IN-POD') }}
+          -> ran on '{{ where.stdout }}'
+
+    # ------------------------------------------------------------------
+    # environment: vs ansible_kubectl_local_env_vars — seeing is believing.
+    # Both tasks below run INSIDE the worker pod and print $WHO_SET_ME.
+    # ------------------------------------------------------------------
+
+    - name: environment reaches INSIDE the pod
+      vars:
+        ansible_connection: kubernetes.core.kubectl
+        ansible_python_interpreter: /usr/local/bin/python3
+        ansible_kubectl_namespace: "{{ kube_namespace }}"
+        ansible_kubectl_config: "{{ kubeconfig }}"
+        ansible_kubectl_pod: "{{ dynamic_pod_name }}"
+        ansible_kubectl_container: worker
+      environment:
+        WHO_SET_ME: "the environment keyword"
+      ansible.builtin.shell: echo "WHO_SET_ME='${WHO_SET_ME:-<empty>}'"
+      register: env_inside
+      changed_when: false
+
+    - name: local_env_vars does NOT — it lives with the controller's kubectl
+      vars:
+        ansible_connection: kubernetes.core.kubectl
+        ansible_python_interpreter: /usr/local/bin/python3
+        ansible_kubectl_namespace: "{{ kube_namespace }}"
+        ansible_kubectl_config: "{{ kubeconfig }}"
+        ansible_kubectl_pod: "{{ dynamic_pod_name }}"
+        ansible_kubectl_container: worker
+        ansible_kubectl_local_env_vars:
+          WHO_SET_ME: "kubectl_local_env_vars"
+      ansible.builtin.shell: echo "WHO_SET_ME='${WHO_SET_ME:-<empty>}'"
+      register: env_local
+      changed_when: false
+
+    - name: Compare
+      ansible.builtin.debug:
+        msg:
+          - "environment:                    {{ env_inside.stdout }}"
+          - "kubectl_local_env_vars:         {{ env_local.stdout }}"
+          - "-> environment is for the task on the target;"
+          - "-> local_env_vars is for kubectl itself on the controller (auth, proxy)."

@@ -1,0 +1,55 @@
+---
+# 2 — Helm releases as Ansible tasks
+#
+# helm_repository + helm + helm_info. The values are just Ansible vars, so the
+# same release gets per-site configuration for free.
+#
+# Rerun with a change to see convergence (changed=true only when needed):
+#   ansible-playbook playbooks/02-helm.yml -e podinfo_message='hello from my laptop'
+#
+# No network? scripts/01-setup.sh pre-pulls the chart tarball, so
+#   -e podinfo_chart_ref=<repo>/.charts/podinfo-6.7.1.tgz
+# works without network. For private OCI registries see helm_registry_auth.
+
+- name: Manage Helm releases across all sites
+  hosts: sites
+  gather_facts: false
+  vars:
+    podinfo_version: "6.7.1"
+    podinfo_chart_ref: podinfo/podinfo
+    podinfo_message: "Deployed by Ansible to {{ site_id }}"
+  module_defaults:
+    group/kubernetes.core.helm:
+      kubeconfig: "{{ kubeconfig }}"
+
+  tasks:
+    - name: Ensure the podinfo chart repository is configured
+      kubernetes.core.helm_repository:
+        name: podinfo
+        repo_url: https://stefanprodan.github.io/podinfo
+
+    - name: Ensure podinfo release is deployed with our values
+      kubernetes.core.helm:
+        name: podinfo
+        chart_ref: "{{ podinfo_chart_ref }}"
+        chart_version: "{{ podinfo_version }}"
+        release_namespace: "{{ kube_namespace }}"
+        create_namespace: true
+        wait: true
+        values:
+          replicaCount: 1
+          ui:
+            message: "{{ podinfo_message }}"
+
+    - name: Read back the release state
+      kubernetes.core.helm_info:
+        release_name: podinfo
+        release_namespace: "{{ kube_namespace }}"
+      register: release
+
+    - name: Show release status
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: podinfo
+          {{ release.status.chart | default('?') }}
+          is {{ release.status.status | default('unknown') }}

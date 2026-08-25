@@ -1,0 +1,47 @@
+# Plain Kubernetes manifest + Jinja2 = templating without a chart.
+# Multi-document YAML is fine: kubernetes.core.k8s applies every document.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: {{ kube_namespace }}
+  labels:
+    app: web
+    site: {{ site_id }}
+spec:
+  replicas: {{ web_replicas | default(2) }}
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        site: {{ site_id }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ web_image | default('nginx:1.27-alpine') }}
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: {{ kube_namespace }}
+  labels:
+    app: web
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80

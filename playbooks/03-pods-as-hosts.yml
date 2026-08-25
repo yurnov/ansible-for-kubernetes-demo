@@ -1,0 +1,125 @@
+---
+# 3 — Pods as managed hosts (kubectl connection plugin)
+#
+# Play 1 creates a long-running "ansible-worker" pod (python:3.12-slim) on each
+# site. Play 2 then treats those pods as ordinary inventory hosts — see the
+# `workers` group in inventory/sites.yml: ansible_connection is
+# kubernetes.core.kubectl and modules execute INSIDE the container.
+#
+# The rule to remember:
+#   * modules (ping, command, copy, template, ...) need Python in the image
+#   * raw and script do NOT — they only need a shell
+#   * no Python and no shell? drive it from outside with k8s_exec
+# Play 3 proves it against the python-less nginx pod from playbook 01.
+
+- name: Create a worker pod with Python on every site
+  hosts: sites
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig }}"
+
+  tasks:
+    - name: Ensure ansible-worker pod is running
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ playbook_dir }}/../templates/ansible-worker.yaml.j2"
+        wait: true
+        wait_condition:
+          type: Ready
+          # K8s condition statuses are "True"/"False"/"Unknown" — capitalized!
+          status: "True"
+        wait_timeout: 120
+
+- name: Manage the worker pods like any other host
+  hosts: workers
+  gather_facts: false
+
+  tasks:
+    - name: raw works even without Python (plain kubectl exec under the hood)
+      ansible.builtin.raw: uname -a
+      register: raw_out
+      changed_when: false
+
+    - name: ping is a real module — it just ran Python inside the container
+      ansible.builtin.ping:
+
+    - name: Drop a config file into the pod (copy = kubectl-based file transfer)
+      ansible.builtin.copy:
+        content: |
+          managed_by: ansible
+          site: {{ inventory_hostname }}
+        dest: /tmp/managed-by-ansible.yml
+        mode: "0644"
+
+    - name: Read it back
+      ansible.builtin.command: cat /tmp/managed-by-ansible.yml
+      register: cfg
+      changed_when: false
+
+    - name: Show both results
+      ansible.builtin.debug:
+        msg:
+          kernel: "{{ raw_out.stdout | trim }}"
+          config: "{{ cfg.stdout_lines }}"
+
+- name: What happens when the image has NO Python? (nginx from playbook 01)
+  hosts: site-a
+  gather_facts: false
+
+  tasks:
+    - name: Find one web pod
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig }}"
+        kind: Pod
+        namespace: "{{ kube_namespace }}"
+        label_selectors:
+          - app=web
+        field_selectors:
+          - status.phase=Running
+      register: web_pods
+
+    - name: Register it as a temporary inventory host
+      ansible.builtin.add_host:
+        name: pythonless-nginx
+        groups: pythonless
+        ansible_connection: kubernetes.core.kubectl
+        ansible_kubectl_pod: "{{ web_pods.resources[0].metadata.name }}"
+        ansible_kubectl_namespace: "{{ kube_namespace }}"
+        ansible_kubectl_kubeconfig: "{{ kubeconfig }}"
+      changed_when: false
+
+    - name: Alternative when you cannot exec modules — k8s_exec from outside
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ kubeconfig }}"
+        namespace: "{{ kube_namespace }}"
+        pod: "{{ web_pods.resources[0].metadata.name }}"
+        command: nginx -v
+      register: exec_out
+      changed_when: false
+
+    - name: k8s_exec result (ran via the API, no Python needed in the pod)
+      ansible.builtin.debug:
+        msg: "{{ exec_out.stderr | trim }}"
+
+- name: Try real modules against the python-less pod
+  hosts: pythonless
+  gather_facts: false
+
+  tasks:
+    - name: raw still works fine
+      ansible.builtin.raw: nginx -v
+      register: nginx_v
+      changed_when: false
+
+    - name: ping will FAIL — no Python interpreter in nginx:alpine
+      ansible.builtin.ping:
+      ignore_errors: true
+      register: ping_result
+
+    - name: The moral of the story
+      ansible.builtin.debug:
+        msg: >-
+          raw: OK ({{ (nginx_v.stdout ~ nginx_v.stderr) | trim }});
+          ping: {{ ping_result.failed | ternary('FAILED as expected — modules need Python in the image',
+                                                'unexpectedly worked') }}

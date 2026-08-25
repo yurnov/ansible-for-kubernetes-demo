@@ -1,0 +1,79 @@
+---
+# 4 — Dynamic host discovery: k8s_info + add_host
+#
+# Deployment-managed pods have generated names, so no static inventory can
+# list them. The k8s dynamic inventory plugin was deprecated and REMOVED in
+# kubernetes.core 6.0.0; the official replacement is exactly this pattern:
+#
+#   "Use kubernetes.core.k8s_info and ansible.builtin.add_host instead."
+#                       — meta/runtime.yml tombstone, kubernetes.core
+#
+# Play 1: roll out a worker Deployment per site, discover its pods via the
+#         API, and register each one as an in-memory inventory host.
+# Play 2: run real work inside EVERY discovered pod, fleet-wide, across
+#         all clusters, in parallel.
+
+- name: Roll out worker fleet and discover its pods
+  hosts: sites
+  gather_facts: false
+  # GOTCHA worth remembering: add_host bypasses the host loop — it runs only
+  # ONCE per play batch (for the first host). Without serial: 1 only site-a's
+  # pods would be registered and site-b's silently skipped. serial: 1 makes
+  # every site its own batch, so add_host runs once per site.
+  serial: 1
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig }}"
+
+  tasks:
+    - name: Ensure worker-fleet deployment is rolled out
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ playbook_dir }}/../templates/worker-fleet.yaml.j2"
+        wait: true
+        wait_timeout: 120
+
+    - name: Discover the running fleet pods (names are generated!)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ kube_namespace }}"
+        label_selectors:
+          - app=worker-fleet
+        field_selectors:
+          - status.phase=Running
+      register: fleet_pods
+
+    - name: Register every pod as an in-memory inventory host
+      ansible.builtin.add_host:
+        name: "{{ site_id }}--{{ item.metadata.name }}"
+        groups: worker_fleet
+        ansible_connection: kubernetes.core.kubectl
+        ansible_kubectl_pod: "{{ item.metadata.name }}"
+        ansible_kubectl_container: worker
+        ansible_kubectl_namespace: "{{ kube_namespace }}"
+        ansible_kubectl_kubeconfig: "{{ kubeconfig }}"
+        ansible_python_interpreter: /usr/local/bin/python3
+      loop: "{{ fleet_pods.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      changed_when: false
+
+- name: Do real work inside every fleet pod, across all clusters
+  hosts: worker_fleet
+  gather_facts: false
+
+  tasks:
+    - name: Who am I really? (hostname inside the container = pod name)
+      ansible.builtin.command: uname -n
+      register: pod_hostname
+      changed_when: false
+
+    - name: A pretend maintenance task (idempotent, like everything else)
+      ansible.builtin.copy:
+        content: "maintenance completed by {{ lookup('ansible.builtin.env', 'USER') | default('ansible') }}\n"
+        dest: /tmp/maintenance.done
+        mode: "0644"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} -> running inside {{ pod_hostname.stdout }}"

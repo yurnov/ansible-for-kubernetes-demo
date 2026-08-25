@@ -1,0 +1,57 @@
+---
+# 1 — Plain Kubernetes resources with kubernetes.core.k8s
+#
+# One playbook, two clusters: `hosts: sites` fans out over site-a and site-b
+# in parallel. Every host carries its own kubeconfig, module_defaults injects
+# it into every module of the k8s action group — no repetition per task.
+#
+# Try also:
+#   ansible-playbook playbooks/01-resources.yml -e web_replicas=5 --check --diff
+# to preview a change without applying it (kubectl has no real equivalent).
+
+- name: Manage plain Kubernetes resources across all sites
+  hosts: sites
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig }}"
+
+  tasks:
+    - name: Ensure the demo namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ kube_namespace }}"
+
+    - name: Deploy web app from a Jinja2-templated manifest (and wait for rollout)
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ playbook_dir }}/../templates/web-deployment.yaml.j2"
+        wait: true
+        wait_timeout: 120
+
+    - name: Query the pods we just created (label selector, like kubectl -l)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ kube_namespace }}"
+        label_selectors:
+          - app=web
+      register: web_pods
+
+    - name: Show what runs where
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ web_pods.resources | map(attribute='metadata.name') | list }}
+
+    - name: Scale the deployment (idempotent — rerun and nothing changes)
+      kubernetes.core.k8s_scale:
+        api_version: apps/v1
+        kind: Deployment
+        name: web
+        namespace: "{{ kube_namespace }}"
+        replicas: "{{ web_replicas | default(2) }}"
+        wait_timeout: 120

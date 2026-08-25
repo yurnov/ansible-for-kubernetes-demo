@@ -1,0 +1,6 @@
+# Python dependencies of kubernetes.core (controller side).
+# Install with:
+#   pip install -r requirements.txt
+kubernetes>=24.2.0
+requests-oauthlib
+jsonpatch

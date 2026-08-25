@@ -1,0 +1,39 @@
+---
+# Two "sites" = two kind clusters, each with its own kubeconfig.
+# This mirrors a real multi-cluster / multi-site setup where one playbook
+# fans out over N clusters. The kubeconfig files are written by
+# scripts/01-setup.sh into <repo>/.kube/.
+
+sites:
+  hosts:
+    site-a:
+      site_id: site-a
+      kubeconfig: "{{ inventory_dir }}/../.kube/site-a.yaml"
+    site-b:
+      site_id: site-b
+      kubeconfig: "{{ inventory_dir }}/../.kube/site-b.yaml"
+  vars:
+    # K8s modules run on the controller and talk to the API server,
+    # so the "host" is just a bag of variables + a local connection.
+    ansible_connection: local
+    kube_namespace: demo
+
+# Pods as managed hosts: a *static* mapping works when pod names are stable
+# (here: a bare Pod named "ansible-worker" created by playbook 03).
+# For Deployment-managed pods with generated names, see playbook 04.
+workers:
+  hosts:
+    worker-site-a:
+      kubeconfig: "{{ inventory_dir }}/../.kube/site-a.yaml"
+    worker-site-b:
+      kubeconfig: "{{ inventory_dir }}/../.kube/site-b.yaml"
+  vars:
+    ansible_connection: kubernetes.core.kubectl
+    # Host name != pod name, so the pod must be named explicitly.
+    ansible_kubectl_pod: ansible-worker
+    ansible_kubectl_container: worker
+    ansible_kubectl_namespace: demo
+    ansible_kubectl_kubeconfig: "{{ kubeconfig }}"
+    # Modules execute *inside* the container -> Python must exist there.
+    # Pinning the interpreter skips discovery (one less exec round-trip).
+    ansible_python_interpreter: /usr/local/bin/python3
