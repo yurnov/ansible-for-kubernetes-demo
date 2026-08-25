@@ -16,6 +16,12 @@ sites:
     # K8s modules run on the controller and talk to the API server,
     # so the "host" is just a bag of variables + a local connection.
     ansible_connection: local
+    # These hosts are named, so interpreter discovery applies to them (only an
+    # *implicit* localhost gets ansible-playbook's own interpreter for free).
+    # Discovery resolves python3 through PATH, which is the venv's only while it
+    # is activated — pin it instead, so the k8s modules always run in the
+    # interpreter that has the `kubernetes` package installed.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
     kube_namespace: demo
 
 # Pods as managed hosts: a *static* mapping works when pod names are stable

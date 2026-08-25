@@ -45,10 +45,10 @@
     - name: Run where it makes sense
       vars:
         ansible_connection: "{{ (this_site == site_id) | ternary('local', 'kubernetes.core.kubectl') }}"
-        # GOTCHA: the discovered interpreter fact belongs to the HOST, not the
-        # connection. Earlier local tasks cached the controller's Python; that
-        # path does not exist inside the pod. Switch the interpreter together
-        # with the connection, or the module will fail with rc=127.
+        # GOTCHA: the interpreter belongs to the HOST, not to the connection.
+        # The inventory pins it to the controller's Python, and that path does
+        # not exist inside the pod. Switch the interpreter together with the
+        # connection, or the module will fail with rc=127.
         ansible_python_interpreter: "{{ (this_site == site_id) | ternary(ansible_playbook_python, '/usr/local/bin/python3') }}"
         ansible_kubectl_namespace: "{{ kube_namespace }}"
         ansible_kubectl_config: "{{ kubeconfig }}"
