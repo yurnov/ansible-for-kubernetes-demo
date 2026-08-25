@@ -1,0 +1,149 @@
+---
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly canary: this demo sits on top of ansible-core, kubernetes.core, the
+  # podinfo chart and kind/Kubernetes, all of which move on their own schedule.
+  # Nothing here is pinned to old versions on purpose — the point is to find
+  # out that the demo broke before somebody clones it and finds out instead.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: azure/setup-kubectl@v5
+
+      - uses: azure/setup-helm@v5
+
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - name: Prerequisites
+        run: ./scripts/00-prereqs.sh
+
+      - name: Create the demo environment
+        run: ./scripts/01-setup.sh
+
+      - name: Use the venv created by the setup script in later steps
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Record the stack under test
+        run: |
+          set -euo pipefail
+          ansible --version | head -1
+          ansible-galaxy collection list kubernetes.core
+          kubectl version --client
+          helm version --short
+          kind version
+
+      - name: Playbook 01 — resources
+        run: ansible-playbook playbooks/01-resources.yml
+
+      - name: Playbook 01 — rerunning it changes nothing
+        run: |
+          set -euo pipefail
+          ansible-playbook playbooks/01-resources.yml | tee "$RUNNER_TEMP/01-rerun.log"
+          if grep -qE 'changed=[1-9]' "$RUNNER_TEMP/01-rerun.log"; then
+            echo "::error::playbook 01 is not idempotent"
+            exit 1
+          fi
+
+      - name: Playbook 01 — check mode previews without applying
+        run: |
+          set -euo pipefail
+          ansible-playbook playbooks/01-resources.yml -e web_replicas=5 --check --diff
+          replicas=$(kubectl --kubeconfig .kube/site-a.yaml -n demo \
+            get deployment web -o jsonpath='{.spec.replicas}')
+          if [ "$replicas" != "2" ]; then
+            echo "::error::check mode applied the change (replicas=$replicas)"
+            exit 1
+          fi
+
+      - name: Playbook 02 — helm install, upgrade on value change, then no-op
+        run: |
+          set -euo pipefail
+          # The chart tarball is pre-pulled by the setup script; using it keeps
+          # the run independent from the upstream chart repository.
+          chart="$PWD/.charts/podinfo-6.7.1.tgz"
+          ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart"
+          ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart" \
+            -e podinfo_message='hello from CI' | tee "$RUNNER_TEMP/02-upgrade.log"
+          if ! grep -qE 'changed=[1-9]' "$RUNNER_TEMP/02-upgrade.log"; then
+            echo "::error::a changed value did not trigger a helm upgrade"
+            exit 1
+          fi
+          ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart" \
+            -e podinfo_message='hello from CI' | tee "$RUNNER_TEMP/02-noop.log"
+          if grep -qE 'changed=[1-9]' "$RUNNER_TEMP/02-noop.log"; then
+            echo "::error::helm release is not idempotent"
+            exit 1
+          fi
+
+      - name: Playbook 03 — pods as managed hosts
+        run: |
+          set -euo pipefail
+          ansible-playbook playbooks/03-pods-as-hosts.yml | tee "$RUNNER_TEMP/03.log"
+          if ! grep -q 'FAILED as expected' "$RUNNER_TEMP/03.log"; then
+            echo "::error::a module unexpectedly ran in the python-less pod"
+            exit 1
+          fi
+
+      - name: Playbook 04 — runtime discovery finds every pod
+        run: |
+          set -euo pipefail
+          ansible-playbook playbooks/04-dynamic-hosts.yml | tee "$RUNNER_TEMP/04.log"
+          found=$(grep -c 'running inside worker-fleet-' "$RUNNER_TEMP/04.log" || true)
+          if [ "$found" -ne 4 ]; then
+            echo "::error::expected 4 discovered pods, got $found"
+            exit 1
+          fi
+          ansible-playbook playbooks/04-dynamic-hosts.yml -e fleet_replicas=3 \
+            | tee "$RUNNER_TEMP/04-scaled.log"
+          found=$(grep -c 'running inside worker-fleet-' "$RUNNER_TEMP/04-scaled.log" || true)
+          if [ "$found" -ne 6 ]; then
+            echo "::error::discovery did not pick up the scaled fleet, got $found pods"
+            exit 1
+          fi
+
+      - name: Playbook 05 — execution location follows THIS_SITE_NAME
+        run: |
+          set -euo pipefail
+          THIS_SITE_NAME=site-a ansible-playbook playbooks/05-site-aware.yml \
+            | tee "$RUNNER_TEMP/05-a.log"
+          grep -q 'site-a: LOCAL' "$RUNNER_TEMP/05-a.log"
+          grep -q 'site-b: IN-POD' "$RUNNER_TEMP/05-a.log"
+          # environment: reaches into the pod, local_env_vars stays with the
+          # controller's kubectl — the whole point of the last two tasks.
+          # the yaml callback doubles the inner quotes, hence '+
+          grep -qE "environment:\s+WHO_SET_ME='+the environment keyword" "$RUNNER_TEMP/05-a.log"
+          grep -qE "kubectl_local_env_vars:\s+WHO_SET_ME='+<empty>" "$RUNNER_TEMP/05-a.log"
+          THIS_SITE_NAME=site-b ansible-playbook playbooks/05-site-aware.yml \
+            | tee "$RUNNER_TEMP/05-b.log"
+          grep -q 'site-a: IN-POD' "$RUNNER_TEMP/05-b.log"
+          grep -q 'site-b: LOCAL' "$RUNNER_TEMP/05-b.log"
+
+      - name: Teardown
+        if: always()
+        run: ./scripts/99-teardown.sh

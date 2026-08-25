@@ -1,0 +1,22 @@
+---
+# Also picked up by ansible-lint, which requires the settings below the
+# line-length rule — keep them as they are or ansible-lint disables fix mode.
+extends: default
+
+rules:
+  line-length:
+    max: 160
+  # GitHub workflow files use `on:` as a key, which YAML reads as a boolean.
+  # Values are still checked.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+ignore-from-file: .gitignore

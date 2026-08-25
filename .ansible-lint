@@ -1,0 +1,13 @@
+---
+profile: production
+
+exclude_paths:
+  - .venv/
+  - .charts/
+  - .kube/
+
+skip_list:
+  # Some task names deliberately start with the module or keyword the task is
+  # about — `raw`, `ping`, `environment`, `local_env_vars`, `k8s_exec`.
+  # Capitalising them would misspell the thing being demonstrated.
+  - name[casing]
