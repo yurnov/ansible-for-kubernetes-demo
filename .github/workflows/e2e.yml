@@ -43,6 +43,15 @@ jobs:
       - name: Prerequisites
         run: ./scripts/00-prereqs.sh
 
+      # Installed ahead of the setup script so a galaxy outage cannot fail the
+      # run: the script's own `ansible-galaxy install` then finds the
+      # requirement already satisfied and does not call out to galaxy at all.
+      - name: Install ansible-core (the setup script installs its own into .venv)
+        run: pip install ansible-core
+
+      - name: Install kubernetes.core
+        uses: ./.github/actions/install-collection
+
       - name: Create the demo environment
         run: ./scripts/01-setup.sh
 
