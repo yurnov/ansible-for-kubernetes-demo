@@ -70,6 +70,14 @@ jobs:
           kubectl version --client
           helm version --short
           kind version
+          # The Kubernetes version under test is the point of the weekly run,
+          # so record it explicitly rather than leaving it implied by the kind
+          # version.
+          for site in site-a site-b; do
+            printf '%s: ' "$site"
+            kubectl --kubeconfig ".kube/$site.yaml" version -o json \
+              | python -c 'import json,sys; print(json.load(sys.stdin)["serverVersion"]["gitVersion"])'
+          done
 
       - name: Playbook 01 — resources
         run: ansible-playbook playbooks/01-resources.yml
