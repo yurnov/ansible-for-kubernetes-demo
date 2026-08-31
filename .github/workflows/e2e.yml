@@ -36,9 +36,13 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      - uses: helm/kind-action@v1
-        with:
-          install_only: true
+      # Not helm/kind-action: it hardcodes the kind and kubectl versions it
+      # installs, so its defaults are only ever as fresh as its own last
+      # release. That is what pinned this canary to Kubernetes 1.35. The script
+      # resolves the newest kind release instead, and `kind create cluster` in
+      # 01-setup.sh then uses that release's own default node image.
+      - name: Install kind
+        run: .github/scripts/install-kind.sh
 
       - name: Prerequisites
         run: ./scripts/00-prereqs.sh

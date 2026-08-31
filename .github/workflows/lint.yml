@@ -44,4 +44,4 @@ jobs:
 
       # shellcheck ships with the GitHub-hosted runner image.
       - name: shellcheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh .github/scripts/*.sh
