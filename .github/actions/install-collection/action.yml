@@ -1,0 +1,33 @@
+---
+name: Install kubernetes.core
+description: >-
+  Install the collection from requirements.yml, retrying transient galaxy
+  failures and falling back to the GitHub tag while galaxy.ansible.com is down.
+
+inputs:
+  fallback-ref:
+    description: >-
+      Tag of ansible-collections/kubernetes.core used only when galaxy cannot
+      be reached at all. Bump it when the demo needs a newer release.
+    required: false
+    default: '6.5.0'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -uo pipefail
+        for attempt in 1 2 3; do
+          if ansible-galaxy collection install -r requirements.yml; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 3 ]; then
+            delay=$((attempt * 20))
+            echo "galaxy install failed (attempt $attempt/3), retrying in ${delay}s"
+            sleep "$delay"
+          fi
+        done
+        echo "::warning::galaxy.ansible.com unreachable — installing kubernetes.core ${{ inputs.fallback-ref }} from GitHub instead"
+        ansible-galaxy collection install \
+          "git+https://github.com/ansible-collections/kubernetes.core.git,${{ inputs.fallback-ref }}"
