@@ -70,7 +70,7 @@ rollout needs network to pull it).
 
 ```bash
 ansible-playbook playbooks/02-helm.yml
-ansible-playbook playbooks/02-helm.yml -e podinfo_message='hello from my laptop'
+ansible-playbook playbooks/02-helm.yml -e '{"podinfo_message":"hello from my laptop"}'
 ```
 
 `helm_repository` + `helm` + `helm_info`. First run installs, the second upgrades because a
