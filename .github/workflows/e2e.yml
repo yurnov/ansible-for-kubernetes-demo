@@ -110,13 +110,13 @@ jobs:
           chart="$PWD/.charts/podinfo-6.7.1.tgz"
           ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart"
           ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart" \
-            -e podinfo_message='hello from CI' | tee "$RUNNER_TEMP/02-upgrade.log"
+            -e '{"podinfo_message":"hello from CI"}' | tee "$RUNNER_TEMP/02-upgrade.log"
           if ! grep -qE 'changed=[1-9]' "$RUNNER_TEMP/02-upgrade.log"; then
             echo "::error::a changed value did not trigger a helm upgrade"
             exit 1
           fi
           ansible-playbook playbooks/02-helm.yml -e podinfo_chart_ref="$chart" \
-            -e podinfo_message='hello from CI' | tee "$RUNNER_TEMP/02-noop.log"
+            -e '{"podinfo_message":"hello from CI"}' | tee "$RUNNER_TEMP/02-noop.log"
           if grep -qE 'changed=[1-9]' "$RUNNER_TEMP/02-noop.log"; then
             echo "::error::helm release is not idempotent"
             exit 1

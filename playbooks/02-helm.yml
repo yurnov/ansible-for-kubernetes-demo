@@ -5,7 +5,10 @@
 # same release gets per-site configuration for free.
 #
 # Rerun with a change to see convergence (changed=true only when needed):
-#   ansible-playbook playbooks/02-helm.yml -e podinfo_message='hello from my laptop'
+#   ansible-playbook playbooks/02-helm.yml -e '{"podinfo_message":"hello from my laptop"}'
+#
+# The JSON form matters: a bare -e key='two words' is parsed as key=two plus a
+# stray _raw_params=words, so the value silently truncates at the first space.
 #
 # No network? scripts/01-setup.sh pre-pulls the chart tarball, so
 #   -e podinfo_chart_ref=<repo>/.charts/podinfo-6.7.1.tgz
