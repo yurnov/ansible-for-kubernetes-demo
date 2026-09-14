@@ -1,5 +1,13 @@
 # Ansible for Kubernetes — a hands-on demo
 
+<p align="center">
+  <img src="docs/images/ansibull-and-captain-kube.png"
+       alt="Cartoon of the Ansible bull shaking hands with Captain Kube, the Kubernetes owl"
+       width="380">
+</p>
+
+<p align="center"><sub>AI-generated illustration — see <a href="#attribution">Attribution</a>.</sub></p>
+
 Five small playbooks showing where Ansible genuinely helps in a Kubernetes shop:
 managing resources and Helm releases as idempotent tasks, treating pods as ordinary
 managed hosts, discovering pods at runtime, and fanning one playbook out over several
@@ -157,6 +165,38 @@ scripts/             00-prereqs.sh · 01-setup.sh · 99-teardown.sh
 | `module interpreter ... not found`, rc=127 | set `ansible_python_interpreter` together with the connection switch (see playbook 05) |
 | `DEPRECATION WARNING: Direct access to the environment attribute` | comes from inside `kubernetes.core`, not from these playbooks — harmless with recent ansible-core |
 
+## Attribution
+
+The illustration at the top of this README is an **AI-generated** image, created for this
+repository. It is not an official asset of either project, and it is neither produced nor
+endorsed by the Cloud Native Computing Foundation, The Linux Foundation, the Ansible
+project, or Red Hat. It depicts two community mascots:
+
+- **Captain Kube**, the Kubernetes character from the Phippy & Friends family, is owned by
+  The Linux Foundation, on behalf of the Cloud Native Computing Foundation, and licensed
+  under the
+  [Creative Commons Attribution License (CC-BY)](https://creativecommons.org/licenses/by/4.0/).
+  Attribution: [phippy.io](https://phippy.io).
+- **The Ansible bull** ("Ansibull"), the officially unnamed cartoon mascot of the Ansible
+  community, from [ansible/logos](https://github.com/ansible/logos), where the community
+  logo artwork is licensed under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). That license covers
+  copyright only, not trademarks: the Ansible name and the "A" in a shaded circle are marks
+  of Red Hat, Inc. — see
+  [TRADEMARKS.md](https://github.com/ansible/logos/blob/main/TRADEMARKS.md) and the
+  [Ansible trademark usage guide](https://docs.ansible.com/projects/ansible/latest/dev_guide/style_guide/trademarks.html).
+
+Because it builds on CC BY-SA 4.0 material, the image itself
+(`docs/images/ansibull-and-captain-kube.png`) is licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) rather than under the
+Apache-2.0 license that covers the rest of this repository.
+
+Ansible® is a registered trademark of Red Hat, Inc. in the United States and other
+countries. Kubernetes® is a registered trademark of The Linux Foundation in the United
+States and other countries. These marks are used here nominatively, to refer to the
+projects themselves, and their use does not imply affiliation or endorsement.
+
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE). Copy anything here into your own playbooks.
+The README illustration is the one exception; see [Attribution](#attribution) above.
