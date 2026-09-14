@@ -157,9 +157,12 @@ jobs:
           grep -q 'site-b: IN-POD' "$RUNNER_TEMP/05-a.log"
           # environment: reaches into the pod, local_env_vars stays with the
           # controller's kubectl — the whole point of the last two tasks.
-          # the yaml callback doubles the inner quotes, hence '+
-          grep -qE "environment:\s+WHO_SET_ME='+the environment keyword" "$RUNNER_TEMP/05-a.log"
-          grep -qE "kubectl_local_env_vars:\s+WHO_SET_ME='+<empty>" "$RUNNER_TEMP/05-a.log"
+          grep -qE "SET_BY_ENVIRONMENT\s+-> reached the task inside the pod" "$RUNNER_TEMP/05-a.log"
+          grep -qE "SET_BY_LOCAL_ENV_VARS\s+-> \(not set in the pod\)" "$RUNNER_TEMP/05-a.log"
+          # and the positive half: kubectl reached the pod with no --kubeconfig,
+          # using only what local_env_vars handed the local process
+          grep -q "using only the KUBECONFIG that local_env_vars gave the local process" \
+            "$RUNNER_TEMP/05-a.log"
           THIS_SITE_NAME=site-b ansible-playbook playbooks/05-site-aware.yml \
             | tee "$RUNNER_TEMP/05-b.log"
           grep -q 'site-a: IN-POD' "$RUNNER_TEMP/05-b.log"

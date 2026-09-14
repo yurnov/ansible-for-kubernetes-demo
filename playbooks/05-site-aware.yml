@@ -79,7 +79,16 @@
     # Both tasks below run INSIDE the worker pod and print $WHO_SET_ME.
     # ------------------------------------------------------------------
 
-    - name: environment reaches INSIDE the pod
+    # These two only make sense where the connection IS kubectl: at the local
+    # site there is no kubectl process to give variables to, so they skip —
+    # which is itself worth saying out loud.
+    #
+    # Note what CANNOT be shown by printing variables from the task: local_env_vars
+    # is never visible to the task, on either site. Locally the kubectl connection
+    # plugin is not in play at all; in-pod the variable stayed with kubectl on the
+    # controller. That is why the second task proves it from the other end instead.
+    - name: environment vs local_env_vars, side by side in one task
+      when: this_site != site_id
       vars:
         ansible_connection: kubernetes.core.kubectl
         ansible_python_interpreter: /usr/local/bin/python3
@@ -87,30 +96,42 @@
         ansible_kubectl_config: "{{ kubeconfig }}"
         ansible_kubectl_pod: "{{ dynamic_pod_name }}"
         ansible_kubectl_container: worker
+        # Distinct names on purpose: with one shared name `environment` simply
+        # wins inside the pod and the comparison shows nothing.
+        ansible_kubectl_local_env_vars:
+          SET_BY_LOCAL_ENV_VARS: "reached the kubectl process"
       environment:
-        WHO_SET_ME: "the environment keyword"
-      ansible.builtin.shell: echo "WHO_SET_ME='${WHO_SET_ME:-<empty>}'"
-      register: env_inside
+        SET_BY_ENVIRONMENT: "reached the task inside the pod"
+      ansible.builtin.shell: |
+        echo "SET_BY_ENVIRONMENT      -> ${SET_BY_ENVIRONMENT:-(not set in the pod)}"
+        echo "SET_BY_LOCAL_ENV_VARS   -> ${SET_BY_LOCAL_ENV_VARS:-(not set in the pod)}"
+      register: env_compare
       changed_when: false
 
-    - name: local_env_vars does NOT — it lives with the controller's kubectl
+    # The positive half: no ansible_kubectl_config here, so the ONLY way kubectl
+    # can find a cluster is the KUBECONFIG that local_env_vars hands it. If the
+    # option did nothing, this host would be UNREACHABLE.
+    - name: kubeconfig delivered to kubectl ONLY via local_env_vars
+      when: this_site != site_id
       vars:
         ansible_connection: kubernetes.core.kubectl
         ansible_python_interpreter: /usr/local/bin/python3
         ansible_kubectl_namespace: "{{ kube_namespace }}"
-        ansible_kubectl_config: "{{ kubeconfig }}"
         ansible_kubectl_pod: "{{ dynamic_pod_name }}"
         ansible_kubectl_container: worker
         ansible_kubectl_local_env_vars:
-          WHO_SET_ME: "kubectl_local_env_vars"
-      ansible.builtin.shell: echo "WHO_SET_ME='${WHO_SET_ME:-<empty>}'"
-      register: env_local
+          KUBECONFIG: "{{ kubeconfig }}"
+      ansible.builtin.command: uname -n
+      register: via_local_env_vars
       changed_when: false
 
     - name: Compare
+      when: this_site != site_id
       ansible.builtin.debug:
-        msg:
-          - "environment:                    {{ env_inside.stdout }}"
-          - "kubectl_local_env_vars:         {{ env_local.stdout }}"
-          - "-> environment is for the task on the target;"
-          - "-> local_env_vars is for kubectl itself on the controller (auth, proxy)."
+        msg: "{{ env_compare.stdout_lines + proof }}"
+      vars:
+        proof:
+          - "both were set on the SAME task - only environment crossed into the pod"
+          - "yet kubectl still reached {{ via_local_env_vars.stdout }} with no --kubeconfig,"
+          - "using only the KUBECONFIG that local_env_vars gave the local process"
+          - "that is where aws eks get-token, gcloud, kubelogin and proxies read theirs"
