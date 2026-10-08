@@ -67,6 +67,7 @@ jobs:
           set -euo pipefail
           ansible --version | head -1
           ansible-galaxy collection list kubernetes.core
+          python -c 'import kubernetes; print("kubernetes", kubernetes.__version__)'
           kubectl version --client
           helm version --short
           kind version
