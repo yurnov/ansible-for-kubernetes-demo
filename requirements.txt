@@ -1,11 +1,9 @@
 # Python dependencies of kubernetes.core (controller side).
 # Install with:
 #   pip install -r requirements.txt
-# <37.0.0 is temporary (yurnov/ansible-for-kubernetes-demo#8): client 37.0.0
-# broke the deprecated kubernetes.client.apis alias that k8s_exec imports
-# from. Drop the pin once either fix is released:
-#   kubernetes-client/python#2726 (client) or
-#   ansible-collections/kubernetes.core#1274 (collection).
-kubernetes>=24.2.0,<37.0.0
+# !=37.0.0 (yurnov/ansible-for-kubernetes-demo#8): client 37.0.0 broke the
+# deprecated kubernetes.client.apis alias that k8s_exec imports from.
+# Fixed in 37.0.1 by kubernetes-client/python#2727.
+kubernetes>=24.2.0,!=37.0.0
 requests-oauthlib
 jsonpatch
