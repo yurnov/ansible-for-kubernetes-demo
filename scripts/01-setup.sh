@@ -56,10 +56,29 @@ done
 
 echo
 echo "== Pre-pulling images and loading them into the clusters =="
+# `kind load docker-image` breaks on Docker's containerd image store (the
+# default since Docker 29): `docker save` exports the multi-arch index but only
+# the host platform's layers, and kind's `ctr images import --all-platforms`
+# fails on the rest ("content digest ... not found"). On that store, save only
+# the host platform and load the archive instead. `docker save --platform`
+# needs Docker 28+, so the classic store keeps the plain path.
+archive=""
+if docker info -f '{{.DriverStatus}}' | grep -q 'io.containerd.snapshotter'; then
+    platform=$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}')
+    archive=$(mktemp)
+    trap 'rm -f "$archive"' EXIT
+fi
 for image in "${IMAGES[@]}"; do
     docker pull -q "$image"
+    if [ -n "$archive" ]; then
+        docker save --platform "$platform" -o "$archive" "$image"
+    fi
     for site in "${SITES[@]}"; do
-        kind load docker-image "$image" --name "$site"
+        if [ -n "$archive" ]; then
+            kind load image-archive "$archive" --name "$site"
+        else
+            kind load docker-image "$image" --name "$site"
+        fi
     done
 done
 
